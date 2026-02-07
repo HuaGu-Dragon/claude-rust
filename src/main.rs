@@ -1,7 +1,12 @@
+use anyhow::Context;
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
 use serde_json::{Value, json};
 use std::{env, process};
+
+use crate::tools::{FunctionCall, Tool, ToolTy::Function};
+
+mod tools;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -62,6 +67,33 @@ async fn main() -> anyhow::Result<()> {
 
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     eprintln!("Logs from your program will appear here!");
+
+    // I am just stupid
+    if let Some(tools) = response["choices"][0]["message"]["tool_calls"].as_array() {
+        for tool in tools {
+            let tool: Tool =
+                serde_json::from_value(tool.clone()).context("parse response into tool")?;
+
+            match tool.ty {
+                Function {
+                    function: FunctionCall { name, args },
+                } => match name.as_str() {
+                    "Read" => {
+                        let path = args.get("file_path").expect("there must be a file_path");
+
+                        eprintln!("{path}");
+                        // ???
+                        let content = tokio::fs::read_to_string(path)
+                            .await
+                            .with_context(|| format!("read `{path}`'s content"))?;
+
+                        println!("{content}")
+                    }
+                    _ => unreachable!(),
+                },
+            }
+        }
+    }
 
     if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
         println!("{}", content);
