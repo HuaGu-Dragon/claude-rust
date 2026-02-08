@@ -37,27 +37,54 @@ async fn main() -> anyhow::Result<()> {
 
     let client = Client::with_config(config);
 
-    let messages = vec![Message::User {
+    let mut messages = vec![Message::User {
         content: args.prompt,
     }];
 
-    let response: Value = client
-        .chat()
-        .create_byot(json!({
-            "messages": messages,
-            "model": "anthropic/claude-haiku-4.5",
-            "tools": tools_define()
-        }))
-        .await?;
+    loop {
+        let response: Value = client
+            .chat()
+            .create_byot(json!({
+                "messages": messages,
+                "model": "anthropic/claude-haiku-4.5",
+                "tools": tools_define()
+            }))
+            .await?;
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    eprintln!("Logs from your program will appear here!");
+        // You can use print statements as follows for debugging, they'll be visible when running tests.
+        eprintln!("Logs from your program will appear here!");
 
-    if let Some(tools) = response["choices"][0]["message"]["tool_calls"].as_array() {
+        let msg = &response["choices"][0]["message"]["content"];
+
+        let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() else {
+            let msg: String =
+                serde_json::from_value(msg.clone()).context("parse content to string")?;
+            println!("{msg}");
+            break;
+        };
+
+        if tool_calls.is_empty() {
+            let msg: String =
+                serde_json::from_value(msg.clone()).context("parse content to string")?;
+            println!("{msg}")
+        }
+
+        let tools: Vec<Tool> = tool_calls
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()))
+            .collect::<serde_json::Result<_>>()
+            .context("parse response into tool")?;
+
+        messages.push(Message::Assistant {
+            content: if msg.is_null() {
+                Option::None
+            } else {
+                serde_json::from_value(msg.clone()).context("parse content to string")?
+            },
+            tool_calls: tools.clone(),
+        });
+
         for tool in tools {
-            let tool: Tool =
-                serde_json::from_value(tool.clone()).context("parse response into tool")?;
-
             match tool.ty {
                 Function {
                     function: FunctionCall { name, args },
@@ -69,16 +96,14 @@ async fn main() -> anyhow::Result<()> {
                             .await
                             .with_context(|| format!("read `{path}`'s content"))?;
 
-                        println!("{content}")
+                        messages.push(Message::Tool {
+                            tool_call_id: tool.id,
+                            content,
+                        });
                     }
                 },
             }
         }
     }
-
-    if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-        println!("{}", content);
-    }
-
     Ok(())
 }

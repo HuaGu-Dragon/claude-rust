@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub fn tools_define() -> Value {
@@ -25,27 +25,27 @@ pub fn tools_define() -> Value {
     ])
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Tool {
-    id: String,
+    pub id: String,
     #[serde(flatten)]
     pub ty: ToolTy,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ToolTy {
     Function { function: FunctionCall },
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FunctionCall {
     pub name: ToolName,
     #[serde(rename = "arguments", with = "deserialize_string_to_hashmap")]
     pub args: HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ToolName {
     Read,
 }
@@ -53,7 +53,15 @@ pub enum ToolName {
 mod deserialize_string_to_hashmap {
     use std::collections::HashMap;
 
-    use serde::{Deserialize, Deserializer};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(table: &HashMap<String, String>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = format!("{:?}", table);
+        serializer.serialize_str(&s)
+    }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
     where

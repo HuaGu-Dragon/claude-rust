@@ -1,9 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+use crate::tools::Tool;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
-    User { content: String },
+    User {
+        content: String,
+    },
+    Assistant {
+        content: Option<String>,
+        tool_calls: Vec<Tool>,
+    },
+    Tool {
+        tool_call_id: String,
+        content: String,
+    },
 }
 
 #[test]
