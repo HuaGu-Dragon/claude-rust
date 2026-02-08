@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use crate::message::Message;
 
 pub fn tools_define() -> Value {
     json!([
@@ -111,6 +114,63 @@ mod deserialize_string_to_hashmap {
         let table = serde_json::from_str(&s).expect("must parse as a hash table");
 
         Ok(table)
+    }
+}
+
+impl Tool {
+    pub async fn exec(self, messages: &mut Vec<Message>) -> anyhow::Result<()> {
+        match self.ty {
+            ToolTy::Function {
+                function: FunctionCall { name, args },
+            } => match name {
+                ToolName::Read => {
+                    let path = args.get("file_path").expect("there must be a file_path");
+
+                    let content = tokio::fs::read_to_string(path)
+                        .await
+                        .with_context(|| format!("read `{path}`'s content"))?;
+
+                    messages.push(Message::Tool {
+                        tool_call_id: self.id,
+                        content,
+                    });
+                }
+                ToolName::Write => {
+                    let path = args.get("file_path").expect("there must be a file_path");
+                    let content = args.get("content").expect("there must be a content");
+
+                    tokio::fs::write(path, content)
+                        .await
+                        .with_context(|| format!("write content to `{path}`"))?;
+
+                    messages.push(Message::Tool {
+                        tool_call_id: self.id,
+                        content: content.clone(),
+                    });
+                }
+                ToolName::Bash => {
+                    let com = args.get("command").expect("there must be a command");
+                    let output = std::process::Command::new("bash")
+                        .arg("-c")
+                        .arg(com)
+                        .output()
+                        .context("spawn a child process to exec bash command")?;
+
+                    let content = if output.status.success() {
+                        output.stdout
+                    } else {
+                        output.stderr
+                    };
+
+                    messages.push(Message::Tool {
+                        tool_call_id: self.id,
+                        content: String::from_utf8_lossy(&content).to_string(),
+                    });
+                }
+            },
+        }
+
+        Ok(())
     }
 }
 

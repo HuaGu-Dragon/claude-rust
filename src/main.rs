@@ -6,7 +6,7 @@ use std::{env, process};
 
 use crate::{
     message::Message,
-    tools::{FunctionCall, Tool, ToolName, ToolTy::Function, tools_define},
+    tools::{Tool, tools_define},
 };
 
 mod message;
@@ -85,56 +85,7 @@ async fn main() -> anyhow::Result<()> {
         });
 
         for tool in tools {
-            match tool.ty {
-                Function {
-                    function: FunctionCall { name, args },
-                } => match name {
-                    ToolName::Read => {
-                        let path = args.get("file_path").expect("there must be a file_path");
-
-                        let content = tokio::fs::read_to_string(path)
-                            .await
-                            .with_context(|| format!("read `{path}`'s content"))?;
-
-                        messages.push(Message::Tool {
-                            tool_call_id: tool.id,
-                            content,
-                        });
-                    }
-                    ToolName::Write => {
-                        let path = args.get("file_path").expect("there must be a file_path");
-                        let content = args.get("content").expect("there must be a content");
-
-                        tokio::fs::write(path, content)
-                            .await
-                            .with_context(|| format!("write content to `{path}`"))?;
-
-                        messages.push(Message::Tool {
-                            tool_call_id: tool.id,
-                            content: content.clone(),
-                        });
-                    }
-                    ToolName::Bash => {
-                        let com = args.get("command").expect("there must be a command");
-                        let output = std::process::Command::new("bash")
-                            .arg("-c")
-                            .arg(com)
-                            .output()
-                            .context("spawn a child process to exec bash command")?;
-
-                        let content = if output.status.success() {
-                            output.stdout
-                        } else {
-                            output.stderr
-                        };
-
-                        messages.push(Message::Tool {
-                            tool_call_id: tool.id,
-                            content: String::from_utf8_lossy(&content).to_string(),
-                        });
-                    }
-                },
-            }
+            tool.exec(&mut messages).await?;
         }
     }
     Ok(())
