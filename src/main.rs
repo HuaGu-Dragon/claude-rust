@@ -4,8 +4,12 @@ use clap::Parser;
 use serde_json::{Value, json};
 use std::{env, process};
 
-use crate::tools::{FunctionCall, Tool, ToolTy::Function};
+use crate::{
+    message::Message,
+    tools::{FunctionCall, Tool, ToolName, ToolTy::Function, tools_define},
+};
 
+mod message;
 mod tools;
 
 #[derive(Parser)]
@@ -33,42 +37,22 @@ async fn main() -> anyhow::Result<()> {
 
     let client = Client::with_config(config);
 
+    let messages = vec![Message::User {
+        content: args.prompt,
+    }];
+
     let response: Value = client
         .chat()
         .create_byot(json!({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": args.prompt
-                }
-            ],
+            "messages": messages,
             "model": "anthropic/claude-haiku-4.5",
-            "tools": [
-                {
-                  "type": "function",
-                  "function": {
-                    "name": "Read",
-                    "description": "Read and return the contents of a file",
-                    "parameters": {
-                      "type": "object",
-                      "properties": {
-                        "file_path": {
-                          "type": "string",
-                          "description": "The path to the file to read"
-                        }
-                      },
-                      "required": ["file_path"]
-                    }
-                  }
-                }
-            ]
+            "tools": tools_define()
         }))
         .await?;
 
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     eprintln!("Logs from your program will appear here!");
 
-    // I am just stupid
     if let Some(tools) = response["choices"][0]["message"]["tool_calls"].as_array() {
         for tool in tools {
             let tool: Tool =
@@ -77,19 +61,16 @@ async fn main() -> anyhow::Result<()> {
             match tool.ty {
                 Function {
                     function: FunctionCall { name, args },
-                } => match name.as_str() {
-                    "Read" => {
+                } => match name {
+                    ToolName::Read => {
                         let path = args.get("file_path").expect("there must be a file_path");
 
-                        eprintln!("{path}");
-                        // ???
                         let content = tokio::fs::read_to_string(path)
                             .await
                             .with_context(|| format!("read `{path}`'s content"))?;
 
                         println!("{content}")
                     }
-                    _ => unreachable!(),
                 },
             }
         }

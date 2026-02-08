@@ -1,25 +1,53 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde_json::{Value, json};
 
-#[derive(Debug, Deserialize)]
+pub fn tools_define() -> Value {
+    json!([
+        {
+          "type": "function",
+          "function": {
+            "name": "Read",
+            "description": "Read and return the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "file_path": {
+                  "type": "string",
+                  "description": "The path to the file to read"
+                }
+              },
+              "required": ["file_path"]
+            }
+          }
+        }
+    ])
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Tool {
     id: String,
     #[serde(flatten)]
     pub ty: ToolTy,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ToolTy {
     Function { function: FunctionCall },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct FunctionCall {
-    pub name: String,
+    pub name: ToolName,
     #[serde(rename = "arguments", with = "deserialize_string_to_hashmap")]
     pub args: HashMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+pub enum ToolName {
+    Read,
 }
 
 mod deserialize_string_to_hashmap {
@@ -32,8 +60,6 @@ mod deserialize_string_to_hashmap {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-
-        eprintln!("{s}");
         let table = serde_json::from_str(&s).expect("must parse as a hash table");
 
         Ok(table)
@@ -42,15 +68,18 @@ mod deserialize_string_to_hashmap {
 
 #[test]
 fn test_de() {
-    // let t = Tool {
-    //     id: "2123".to_string(),
-    //     ty: ToolTy::Function {
-    //         function: FunctionCall {
-    //             name: "Read".to_string(),
-    //             args: HashMap::new(),
-    //         },
-    //     },
-    // };
+    let mut table = HashMap::new();
+    table.insert("file_path".to_string(), "/path/to/file.txt".to_string());
+
+    let t = Tool {
+        id: "call_abc123".to_string(),
+        ty: ToolTy::Function {
+            function: FunctionCall {
+                name: ToolName::Read,
+                args: table,
+            },
+        },
+    };
 
     let input = r#" {
                "id": "call_abc123",
@@ -61,5 +90,7 @@ fn test_de() {
                }
              }"#;
 
-    let _res: Tool = serde_json::from_str(input).unwrap();
+    let res: Tool = serde_json::from_str(input).unwrap();
+
+    assert_eq!(res, t);
 }
