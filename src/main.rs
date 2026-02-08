@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         });
 
         for tool in tools {
-            tool.exec(&mut messages).await?;
+            tool.exec(&mut messages).await.context("tool running")?;
         }
     }
     Ok(())
