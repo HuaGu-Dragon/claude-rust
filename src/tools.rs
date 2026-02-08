@@ -42,6 +42,23 @@ pub fn tools_define() -> Value {
               }
             }
           }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+              "type": "object",
+              "required": ["command"],
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "The command to execute"
+                }
+              }
+            }
+          }
         }
     ])
 }
@@ -70,6 +87,7 @@ pub struct FunctionCall {
 pub enum ToolName {
     Read,
     Write,
+    Bash,
 }
 
 mod deserialize_string_to_hashmap {

@@ -114,6 +114,25 @@ async fn main() -> anyhow::Result<()> {
                             content: content.clone(),
                         });
                     }
+                    ToolName::Bash => {
+                        let com = args.get("command").expect("there must be a command");
+                        let output = std::process::Command::new("bash")
+                            .arg("-c")
+                            .arg(com)
+                            .output()
+                            .context("spawn a child process to exec bash command")?;
+
+                        let content = if output.status.success() {
+                            output.stdout
+                        } else {
+                            output.stderr
+                        };
+
+                        messages.push(Message::Tool {
+                            tool_call_id: tool.id,
+                            content: String::from_utf8_lossy(&content).to_string(),
+                        });
+                    }
                 },
             }
         }
