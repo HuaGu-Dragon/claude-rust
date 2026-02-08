@@ -101,6 +101,19 @@ async fn main() -> anyhow::Result<()> {
                             content,
                         });
                     }
+                    ToolName::Write => {
+                        let path = args.get("file_path").expect("there must be a file_path");
+                        let content = args.get("content").expect("there must be a content");
+
+                        tokio::fs::write(path, content)
+                            .await
+                            .with_context(|| format!("write content to `{path}`"))?;
+
+                        messages.push(Message::Tool {
+                            tool_call_id: tool.id,
+                            content: content.clone(),
+                        });
+                    }
                 },
             }
         }
