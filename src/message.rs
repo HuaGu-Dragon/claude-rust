@@ -16,6 +16,9 @@ pub enum Message {
         tool_call_id: String,
         content: String,
     },
+    System {
+        content: String,
+    },
 }
 
 #[test]

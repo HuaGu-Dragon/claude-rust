@@ -10,6 +10,7 @@ use crate::{
 };
 
 mod message;
+mod skills;
 mod tools;
 
 #[derive(Parser)]
@@ -36,10 +37,29 @@ async fn main() -> anyhow::Result<()> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
-
-    let mut messages = vec![Message::User {
-        content: args.prompt,
-    }];
+    let mut messages = {
+        if let Ok(skills) = skills::load_skills().await {
+            vec![
+                Message::System {
+                    content: format!(
+                        "You have access to the following skills:\n\n{}",
+                        skills
+                            .into_iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    ),
+                },
+                Message::User {
+                    content: args.prompt,
+                },
+            ]
+        } else {
+            vec![Message::User {
+                content: args.prompt,
+            }]
+        }
+    };
 
     loop {
         let response: Value = client
