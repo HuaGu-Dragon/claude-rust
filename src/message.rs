@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::tools::Tool;
+use crate::{skills::Skill, tools::Tool};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "role", rename_all = "lowercase")]
@@ -19,6 +19,16 @@ pub enum Message {
     System {
         content: String,
     },
+}
+
+pub fn parse_user_input<'s>(prompt: &'s str, skills: &'s [Skill]) -> &'s str {
+    if let Some(skill) = prompt.strip_prefix("/")
+        && let Some(skill) = skills.iter().find(|s| s.name == skill)
+    {
+        return skill.content.as_str();
+    }
+
+    prompt
 }
 
 #[test]

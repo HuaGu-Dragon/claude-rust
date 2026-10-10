@@ -4,8 +4,9 @@ use anyhow::Context;
 
 #[derive(Debug)]
 pub struct Skill {
-    name: String,
+    pub name: String,
     description: String,
+    pub content: String,
 }
 
 impl Display for Skill {
@@ -29,7 +30,18 @@ fn parse_skill(content: &str) -> Skill {
         .trim()
         .trim_start_matches("description: ")
         .to_string();
-    Skill { name, description }
+    lines.next();
+
+    let content = lines
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Skill {
+        name,
+        description,
+        content,
+    }
 }
 
 pub async fn load_skills() -> anyhow::Result<Vec<Skill>> {
@@ -55,4 +67,32 @@ pub async fn load_skills() -> anyhow::Result<Vec<Skill>> {
     }
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_skill() {
+        let skill = r#"---
+name: apple
+description: Reports the deploy target for the apple service.
+---
+
+Respond with exactly one word: blueberry
+
+Do not add any other text, punctuation, or formatting."#;
+        let skill = parse_skill(skill);
+
+        assert_eq!(skill.name, "apple");
+        assert_eq!(
+            skill.description,
+            "Reports the deploy target for the apple service."
+        );
+        assert_eq!(
+            skill.content,
+            "Respond with exactly one word: blueberry\nDo not add any other text, punctuation, or formatting."
+        );
+    }
 }
