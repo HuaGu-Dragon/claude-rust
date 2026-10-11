@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{skills::Skill, tools::Tool};
+use crate::{
+    skills::{self, Skill},
+    tools::Tool,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "role", rename_all = "lowercase")]
@@ -21,14 +24,18 @@ pub enum Message {
     },
 }
 
-pub fn parse_user_input<'s>(prompt: &'s str, skills: &'s [Skill]) -> &'s str {
-    if let Some(skill) = prompt.strip_prefix("/")
-        && let Some(skill) = skills.iter().find(|s| s.name == skill)
-    {
-        return skill.content.as_str();
+pub fn parse_user_input(prompt: &str, skills: &[Skill]) -> String {
+    if let Some(arguments) = prompt.strip_prefix("/") {
+        let mut invoke = arguments.split_ascii_whitespace();
+        if let Some(skill_name) = invoke.next()
+            && let Some(skill) = skills.iter().find(|s| s.name == skill_name)
+        {
+            let args = invoke.collect::<Vec<_>>();
+            return skills::parse_skill_content(&skill.content, &args);
+        }
     }
 
-    prompt
+    prompt.to_string()
 }
 
 #[test]
@@ -47,4 +54,18 @@ fn test_de() {
     };
 
     assert_eq!(msg, m);
+}
+
+#[test]
+fn test_content_parse() {
+    let skill = Skill {
+        name: "apple".to_string(),
+        description: "".to_string(),
+        content: "Deploy to $0 in region $1. Full request was: $ARGUMENTS".to_string(),
+    };
+
+    assert_eq!(
+        parse_user_input("/apple staging eu-west", &[skill]),
+        "Deploy to staging in region eu-west. Full request was: staging eu-west"
+    );
 }

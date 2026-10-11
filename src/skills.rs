@@ -5,7 +5,7 @@ use anyhow::Context;
 #[derive(Debug)]
 pub struct Skill {
     pub name: String,
-    description: String,
+    pub(crate) description: String,
     pub content: String,
 }
 
@@ -67,6 +67,56 @@ pub async fn load_skills() -> anyhow::Result<Vec<Skill>> {
     }
 
     Ok(results)
+}
+
+pub(crate) fn parse_skill_content(content: &str, args: &[&str]) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut rest = content;
+
+    loop {
+        if rest.starts_with("$ARGUMENTS") {
+            let mut args = args.iter();
+            if let Some(first) = args.next() {
+                result.push_str(first);
+
+                for arg in args {
+                    result.push(' ');
+                    result.push_str(arg);
+                }
+            }
+
+            rest = &rest["$ARGUMENTS".len()..];
+            continue;
+        }
+
+        match rest.as_bytes().first().copied() {
+            Some(b'$') => {
+                let end = rest[1..]
+                    .find(|c: char| !c.is_ascii_digit())
+                    .map_or(rest.len(), |i| i + 1);
+
+                let placeholder = &rest[..end];
+                let replacement = rest[1..end]
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| args.get(index));
+
+                result.push_str(replacement.unwrap_or(&placeholder));
+                rest = &rest[end..];
+            }
+            Some(_) if let Some(end) = rest.find('$') => {
+                result.push_str(&rest[..end]);
+                rest = &rest[end..];
+            }
+            Some(_) => {
+                result.push_str(rest);
+                break;
+            }
+            None => break,
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
