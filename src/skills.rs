@@ -104,14 +104,24 @@ pub(crate) fn parse_skill_content(content: &str, args: &[&str]) -> String {
                 result.push_str(replacement.unwrap_or(&placeholder));
                 rest = &rest[end..];
             }
-            Some(_) if let Some(end) = rest.find('$') => {
-                result.push_str(&rest[..end]);
-                rest = &rest[end..];
-            }
             Some(_) => {
-                result.push_str(rest);
-                break;
+                if let Some(end) = rest.find('$') {
+                    result.push_str(&rest[..end]);
+                    rest = &rest[end..];
+                } else {
+                    result.push_str(rest);
+                    break;
+                }
             }
+            // FIXME: codecrafters' rustc version is too old to support this syntax
+            // Some(_) if let Some(end) = rest.find('$') => {
+            //     result.push_str(&rest[..end]);
+            //     rest = &rest[end..];
+            // }
+            // Some(_) => {
+            //     result.push_str(rest);
+            //     break;
+            // }
             None => break,
         }
     }
