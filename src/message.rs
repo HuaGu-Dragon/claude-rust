@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    skills::{self, Skill},
-    tools::Tool,
-};
+use crate::{skills::Skill, tools::Tool};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "role", rename_all = "lowercase")]
@@ -45,12 +42,7 @@ pub fn parse_user_input(mut input: &str, skills: &[Skill]) -> Vec<Message> {
     } else {
         calling_skills
             .into_iter()
-            .map(|s| {
-                skills::parse_skill_content(
-                    &s.content,
-                    &input.split_ascii_whitespace().collect::<Vec<_>>(),
-                )
-            })
+            .map(|s| s.parse_skill_content(&input.split_ascii_whitespace().collect::<Vec<_>>()))
             .map(|message| Message::User { content: message })
             .collect()
     }

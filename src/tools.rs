@@ -126,14 +126,16 @@ impl Tool {
                 ToolName::Read => {
                     let path = args.get("file_path").expect("there must be a file_path");
 
-                    let content = tokio::fs::read_to_string(path)
-                        .await
-                        .with_context(|| format!("read `{path}`'s content"))?;
-
-                    messages.push(Message::Tool {
-                        tool_call_id: self.id,
-                        content,
-                    });
+                    match tokio::fs::read_to_string(path).await {
+                        Ok(content) => messages.push(Message::Tool {
+                            tool_call_id: self.id,
+                            content,
+                        }),
+                        Err(e) => messages.push(Message::Tool {
+                            tool_call_id: self.id,
+                            content: e.to_string(),
+                        }),
+                    };
                 }
                 ToolName::Write => {
                     let path = args.get("file_path").expect("there must be a file_path");
