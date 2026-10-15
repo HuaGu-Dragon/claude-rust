@@ -4,64 +4,79 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::message::Message;
+use crate::{message::Message, skills};
 
 pub fn tools_define() -> Value {
     json!([
         {
-          "type": "function",
-          "function": {
-            "name": "Read",
-            "description": "Read and return the contents of a file",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "file_path": {
-                  "type": "string",
-                  "description": "The path to the file to read"
+            "type": "function",
+            "function": {
+                "name": "Read",
+                "description": "Read and return the contents of a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path to the file to read"
+                        }
+                    },
+                    "required": ["file_path"]
                 }
-              },
-              "required": ["file_path"]
             }
-          }
         },
         {
-          "type": "function",
-          "function": {
-            "name": "Write",
-            "description": "Write content to a file",
-            "parameters": {
-              "type": "object",
-              "required": ["file_path", "content"],
-              "properties": {
-                "file_path": {
-                  "type": "string",
-                  "description": "The path of the file to write to"
-                },
-                "content": {
-                  "type": "string",
-                  "description": "The content to write to the file"
+            "type": "function",
+            "function": {
+                "name": "Write",
+                "description": "Write content to a file",
+                "parameters": {
+                    "type": "object",
+                    "required": ["file_path", "content"],
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "The path of the file to write to"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The content to write to the file"
+                        }
+                    }
                 }
-              }
             }
-          }
         },
         {
-          "type": "function",
-          "function": {
-            "name": "Bash",
-            "description": "Execute a shell command",
-            "parameters": {
-              "type": "object",
-              "required": ["command"],
-              "properties": {
-                "command": {
-                  "type": "string",
-                  "description": "The command to execute"
+            "type": "function",
+            "function": {
+                "name": "Bash",
+                "description": "Execute a shell command",
+                "parameters": {
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute"
+                        }
+                    }
                 }
-              }
             }
-          }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "Skill",
+                "description": "Load a skill's instructions into the conversation",
+                "parameters": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": { "type": "string", "description": "The name of the skill to use" },
+                        "args": { "type": "string", "description": "Optional arguments for the skill" }
+                    }
+                }
+            }
         }
     ])
 }
@@ -91,6 +106,7 @@ pub enum ToolName {
     Read,
     Write,
     Bash,
+    Skill,
 }
 
 mod deserialize_string_to_hashmap {
@@ -118,7 +134,11 @@ mod deserialize_string_to_hashmap {
 }
 
 impl Tool {
-    pub async fn exec(self, messages: &mut Vec<Message>) -> anyhow::Result<()> {
+    pub async fn exec(
+        self,
+        messages: &mut Vec<Message>,
+        skills: &[skills::Skill],
+    ) -> anyhow::Result<()> {
         match self.ty {
             ToolTy::Function {
                 function: FunctionCall { name, args },
@@ -167,6 +187,21 @@ impl Tool {
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
                         content: String::from_utf8_lossy(&content).to_string(),
+                    });
+                }
+                ToolName::Skill => {
+                    let skill_name = args.get("name").expect("there must be a name");
+                    let args = args.get("args").map(String::as_str).unwrap_or_default();
+                    let skill = skills
+                        .iter()
+                        .find(|s| &s.name == skill_name)
+                        .with_context(|| format!("could not find skill `{skill_name}`"))?;
+
+                    messages.push(Message::Tool {
+                        tool_call_id: self.id,
+                        content: skill.parse_skill_content(
+                            &args.split_ascii_whitespace().collect::<Vec<_>>(),
+                        ),
                     });
                 }
             },

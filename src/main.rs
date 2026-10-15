@@ -37,11 +37,11 @@ async fn main() -> anyhow::Result<()> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
-    let (mut messages, _skills) = {
+    let (mut messages, skills) = {
         if let Ok(skills) = skills::load_skills().await {
             let mut messages = vec![Message::System {
                 content: format!(
-                    "You have access to the following skills:\n\n{}",
+                    "You have access to the following skills:\n\n{}\nIf a skill matches the user's request, call the Skill tool with its name and follow the instructions it returns.",
                     skills
                         .iter()
                         .map(|s| s.to_string())
@@ -105,7 +105,9 @@ async fn main() -> anyhow::Result<()> {
         });
 
         for tool in tools {
-            tool.exec(&mut messages).await.context("tool running")?;
+            tool.exec(&mut messages, &skills)
+                .await
+                .context("tool running")?;
         }
     }
     Ok(())
