@@ -22,10 +22,14 @@ impl Skill {
     }
 
     pub(crate) fn parse_skill_content(&self, args: &[&str]) -> String {
-        let mut result = String::with_capacity(self.desc().len() + self.content.len());
-        if !self.is_fork {
+        let mut result = if self.is_fork {
+            String::with_capacity(self.content.len())
+        } else {
+            let mut result = String::with_capacity(self.desc().len() + self.content.len());
             result.push_str(&self.desc());
-        }
+            result
+        };
+
         let mut rest = &self.content[..];
 
         loop {
@@ -91,7 +95,6 @@ impl Skill {
         is_sub: bool,
     ) -> String {
         let content = self.parse_skill_content(&args.split_ascii_whitespace().collect::<Vec<_>>());
-        eprintln!("content: {content}");
         if self.is_fork && !is_sub {
             Box::pin(crate::agent_loop(
                 client,
