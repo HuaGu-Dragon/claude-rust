@@ -23,7 +23,9 @@ impl Skill {
 
     pub(crate) fn parse_skill_content(&self, args: &[&str]) -> String {
         let mut result = String::with_capacity(self.desc().len() + self.content.len());
-        result.push_str(&self.desc());
+        if !self.is_fork {
+            result.push_str(&self.desc());
+        }
         let mut rest = &self.content[..];
 
         loop {
