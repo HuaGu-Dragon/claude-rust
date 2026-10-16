@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
-    let (mut messages, skills) = {
+    let (messages, skills) = {
         if let Ok(skills) = skills::load_skills().await {
             let mut messages = vec![Message::System {
                 content: format!(
@@ -49,7 +49,8 @@ async fn main() -> anyhow::Result<()> {
                         .join("\n")
                 ),
             }];
-            messages.extend(message::parse_user_input(&args.prompt, &skills));
+            messages
+                .extend(message::execute_user_input(&client, &args.prompt, &skills, false).await);
             (messages, skills)
         } else {
             (
@@ -61,6 +62,18 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let msg = agent_loop(&client, messages, &skills, false).await?;
+    println!("{msg}");
+
+    Ok(())
+}
+
+async fn agent_loop(
+    client: &Client<OpenAIConfig>,
+    mut messages: Vec<Message>,
+    skills: &[skills::Skill],
+    is_sub: bool,
+) -> anyhow::Result<String> {
     loop {
         let response: Value = client
             .chat()
@@ -79,8 +92,7 @@ async fn main() -> anyhow::Result<()> {
         let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() else {
             let msg: String =
                 serde_json::from_value(msg.clone()).context("parse content to string")?;
-            println!("{msg}");
-            break;
+            break Ok(msg);
         };
 
         if tool_calls.is_empty() {
@@ -105,10 +117,9 @@ async fn main() -> anyhow::Result<()> {
         });
 
         for tool in tools {
-            tool.exec(&mut messages, &skills)
+            tool.exec(client, &mut messages, skills, is_sub)
                 .await
                 .context("tool running")?;
         }
     }
-    Ok(())
 }

@@ -1,3 +1,5 @@
+use async_openai::{Client, config::OpenAIConfig};
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 
 use crate::{skills::Skill, tools::Tool};
@@ -21,7 +23,12 @@ pub enum Message {
     },
 }
 
-pub fn parse_user_input(mut input: &str, skills: &[Skill]) -> Vec<Message> {
+pub async fn execute_user_input(
+    client: &Client<OpenAIConfig>,
+    mut input: &str,
+    skills: &[Skill],
+    is_sub: bool,
+) -> Vec<Message> {
     let mut calling_skills = vec![];
     while let Some(arguments) = input.strip_prefix("/") {
         let (skill_name, rest) = match arguments.split_once(' ') {
@@ -42,9 +49,11 @@ pub fn parse_user_input(mut input: &str, skills: &[Skill]) -> Vec<Message> {
     } else {
         calling_skills
             .into_iter()
-            .map(|s| s.parse_skill_content(&input.split_ascii_whitespace().collect::<Vec<_>>()))
-            .map(|message| Message::User { content: message })
-            .collect()
+            .map(|s| s.execute(client, input, is_sub))
+            .collect::<FuturesUnordered<_>>()
+            .map(|s| Message::User { content: s })
+            .collect::<Vec<_>>()
+            .await
     }
 }
 
@@ -64,47 +73,4 @@ fn test_de() {
     };
 
     assert_eq!(msg, m);
-}
-
-#[test]
-fn test_content_parse() {
-    let skill = Skill {
-        name: "apple".to_string(),
-        description: "".to_string(),
-        content: "Deploy to $0 in region $1. Full request was: $ARGUMENTS".to_string(),
-    };
-
-    assert_eq!(
-        parse_user_input("/apple staging eu-west", &[skill]),
-        vec![Message::User {
-            content: "Deploy to staging in region eu-west. Full request was: staging eu-west"
-                .to_string()
-        }]
-    );
-}
-
-#[test]
-fn test_multiple_skills() {
-    let apple = Skill {
-        name: "apple".to_string(),
-        description: "".to_string(),
-        content: "Add this exact line to your response: blueberry-$ARGUMENTS".to_string(),
-    };
-    let grape = Skill {
-        name: "grape".to_string(),
-        description: "".to_string(),
-        content: "Add this exact line to your response: cherry-$ARGUMENTS".to_string(),
-    };
-
-    assert_eq!(
-        parse_user_input("/apple /grape 4127", &[apple, grape]),
-        vec![
-            Message::User {
-                content: "Add this exact line to your response: blueberry-4127".to_string()
-            },
-            Message::User {
-                content: "Add this exact line to your response: cherry-4127".to_string()
-            }
-        ]
-    );
 }

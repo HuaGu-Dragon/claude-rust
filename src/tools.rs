@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use async_openai::{Client, config::OpenAIConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -136,8 +137,10 @@ mod deserialize_string_to_hashmap {
 impl Tool {
     pub async fn exec(
         self,
+        client: &Client<OpenAIConfig>,
         messages: &mut Vec<Message>,
         skills: &[skills::Skill],
+        is_sub: bool,
     ) -> anyhow::Result<()> {
         match self.ty {
             ToolTy::Function {
@@ -199,9 +202,7 @@ impl Tool {
 
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
-                        content: skill.parse_skill_content(
-                            &args.split_ascii_whitespace().collect::<Vec<_>>(),
-                        ),
+                        content: skill.execute(client, args, is_sub).await,
                     });
                 }
             },

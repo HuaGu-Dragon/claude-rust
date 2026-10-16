@@ -1,12 +1,16 @@
 use std::fmt::Display;
 
 use anyhow::Context;
+use async_openai::{Client, config::OpenAIConfig};
+
+use crate::message::Message;
 
 #[derive(Debug)]
 pub struct Skill {
     pub name: String,
     pub(crate) description: String,
     pub content: String,
+    pub(crate) is_fork: bool,
 }
 
 impl Skill {
@@ -77,6 +81,27 @@ impl Skill {
 
         result
     }
+
+    pub(crate) async fn execute(
+        &self,
+        client: &Client<OpenAIConfig>,
+        args: &str,
+        is_sub: bool,
+    ) -> String {
+        let content = self.parse_skill_content(&args.split_ascii_whitespace().collect::<Vec<_>>());
+        if self.is_fork && !is_sub {
+            Box::pin(crate::agent_loop(
+                client,
+                vec![Message::User { content }],
+                &[],
+                true,
+            ))
+            .await
+            .unwrap_or_default()
+        } else {
+            content
+        }
+    }
 }
 
 impl Display for Skill {
@@ -100,7 +125,12 @@ fn parse_skill(content: &str) -> Skill {
         .trim()
         .trim_start_matches("description: ")
         .to_string();
-    lines.next();
+    let is_fork = lines
+        .next()
+        .is_some_and(|line| line.trim() == "context: fork");
+    if is_fork {
+        lines.next();
+    }
 
     let content = lines
         .filter(|l| !l.trim().is_empty())
@@ -111,6 +141,7 @@ fn parse_skill(content: &str) -> Skill {
         name,
         description,
         content,
+        is_fork,
     }
 }
 
