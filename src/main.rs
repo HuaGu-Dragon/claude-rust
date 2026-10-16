@@ -84,6 +84,8 @@ async fn agent_loop(
             }))
             .await?;
 
+        eprintln!("{is_sub} response: {response:?}");
+
         let msg = &response["choices"][0]["message"]["content"];
 
         let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() else {
