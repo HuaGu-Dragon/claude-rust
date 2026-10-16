@@ -84,9 +84,6 @@ async fn agent_loop(
             }))
             .await?;
 
-        // You can use print statements as follows for debugging, they'll be visible when running tests.
-        eprintln!("Logs from your program will appear here!");
-
         let msg = &response["choices"][0]["message"]["content"];
 
         let Some(tool_calls) = response["choices"][0]["message"]["tool_calls"].as_array() else {
@@ -98,7 +95,7 @@ async fn agent_loop(
         if tool_calls.is_empty() {
             let msg: String =
                 serde_json::from_value(msg.clone()).context("parse content to string")?;
-            println!("{msg}")
+            break Ok(msg);
         }
 
         let tools: Vec<Tool> = tool_calls
