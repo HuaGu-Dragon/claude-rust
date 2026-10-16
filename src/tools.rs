@@ -200,9 +200,11 @@ impl Tool {
                         .find(|s| &s.name == skill_name)
                         .with_context(|| format!("could not find skill `{skill_name}`"))?;
 
+                    let ret = skill.execute(client, args, is_sub).await;
+                    eprintln!("ret: {ret}");
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
-                        content: skill.execute(client, args, is_sub).await,
+                        content: ret,
                     });
                 }
             },

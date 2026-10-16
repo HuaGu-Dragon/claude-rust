@@ -89,6 +89,7 @@ impl Skill {
         is_sub: bool,
     ) -> String {
         let content = self.parse_skill_content(&args.split_ascii_whitespace().collect::<Vec<_>>());
+        eprintln!("content: {content}");
         if self.is_fork && !is_sub {
             Box::pin(crate::agent_loop(
                 client,
