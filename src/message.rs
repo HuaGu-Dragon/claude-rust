@@ -2,7 +2,7 @@ use async_openai::{Client, config::OpenAIConfig};
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 
-use crate::{skills::Skill, tools::Tool};
+use crate::{lsp_client, skills::Skill, tools::Tool};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "role", rename_all = "lowercase")]
@@ -27,6 +27,7 @@ pub async fn execute_user_input(
     client: &Client<OpenAIConfig>,
     mut input: &str,
     skills: &[Skill],
+    lsp: &Option<lsp_client::LspClient>,
     is_sub: bool,
 ) -> Vec<Message> {
     let mut calling_skills = vec![];
@@ -49,7 +50,7 @@ pub async fn execute_user_input(
     } else {
         calling_skills
             .into_iter()
-            .map(|s| s.execute(client, input, is_sub))
+            .map(|s| s.execute(client, input, lsp, is_sub))
             .collect::<FuturesUnordered<_>>()
             .map(|s| Message::User { content: s })
             .collect::<Vec<_>>()

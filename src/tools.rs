@@ -5,7 +5,7 @@ use async_openai::{Client, config::OpenAIConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{message::Message, skills};
+use crate::{lsp_client, message::Message, skills};
 
 pub fn tools_define() -> Value {
     json!([
@@ -78,6 +78,37 @@ pub fn tools_define() -> Value {
                     }
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "LSP",
+                "description": "Returns the file, line, and character where a symbol is defined.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["goToDefinition"]
+                        },
+                        "filePath": {
+                            "type": "string",
+                            "description": "Absolute path, or a path relative to the agent's current working directory."
+                        },
+                        "line": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "1-based line number of the symbol."
+                        },
+                        "character": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "1-based character offset in UTF-16 code units (same as character count for ASCII)."
+                        }
+                    },
+                    "required": ["operation", "filePath", "line", "character"]
+                }
+            }
         }
     ])
 }
@@ -108,6 +139,7 @@ pub enum ToolName {
     Write,
     Bash,
     Skill,
+    Lsp,
 }
 
 mod deserialize_string_to_hashmap {
@@ -140,6 +172,7 @@ impl Tool {
         client: &Client<OpenAIConfig>,
         messages: &mut Vec<Message>,
         skills: &[skills::Skill],
+        lsp: &Option<lsp_client::LspClient>,
         is_sub: bool,
     ) -> anyhow::Result<()> {
         match self.ty {
@@ -200,11 +233,30 @@ impl Tool {
                         .find(|s| &s.name == skill_name)
                         .with_context(|| format!("could not find skill `{skill_name}`"))?;
 
-                    let ret = skill.execute(client, args, is_sub).await;
+                    let ret = skill.execute(client, args, lsp, is_sub).await;
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
                         content: ret,
                     });
+                }
+                ToolName::Lsp => {
+                    if let Some(lsp) = lsp {
+                        // let operation = args.get("operation").expect("there must be an operation");
+                        // let file_path = args.get("filePath").expect("there must be a file path");
+                        // let line = args.get("line").expect("there must be a line");
+                        // let character = args.get("character").expect("there must be a character");
+
+                        // lsp.call(operation, &serde_json::t);
+                        messages.push(Message::Tool {
+                            tool_call_id: self.id,
+                            content: "LSP is not implemented yet".to_string(),
+                        });
+                    } else {
+                        messages.push(Message::Tool {
+                            tool_call_id: self.id,
+                            content: "lsp is not available".to_string(),
+                        });
+                    }
                 }
             },
         }

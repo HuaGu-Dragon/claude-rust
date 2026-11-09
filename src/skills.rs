@@ -3,7 +3,7 @@ use std::fmt::Display;
 use anyhow::Context;
 use async_openai::{Client, config::OpenAIConfig};
 
-use crate::message::Message;
+use crate::{lsp_client, message::Message};
 
 #[derive(Debug)]
 pub struct Skill {
@@ -92,6 +92,7 @@ impl Skill {
         &self,
         client: &Client<OpenAIConfig>,
         args: &str,
+        lsp: &Option<lsp_client::LspClient>,
         is_sub: bool,
     ) -> String {
         let content = self.parse_skill_content(&args.split_ascii_whitespace().collect::<Vec<_>>());
@@ -100,6 +101,7 @@ impl Skill {
                 client,
                 vec![Message::User { content }],
                 &[],
+                lsp,
                 true,
             ))
             .await

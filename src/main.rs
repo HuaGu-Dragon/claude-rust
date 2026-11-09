@@ -9,10 +9,10 @@ use crate::{
     tools::{Tool, tools_define},
 };
 
+mod lsp_client;
 mod message;
 mod skills;
 mod tools;
-
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
@@ -36,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
         .with_api_base(base_url)
         .with_api_key(api_key);
 
+    let lsp = lsp_client::LspClient::from_environment().context("init lsp")?;
+
     let client = Client::with_config(config);
     let (messages, skills) = {
         if let Ok(skills) = skills::load_skills().await {
@@ -49,8 +51,9 @@ async fn main() -> anyhow::Result<()> {
                         .join("\n")
                 ),
             }];
-            messages
-                .extend(message::execute_user_input(&client, &args.prompt, &skills, false).await);
+            messages.extend(
+                message::execute_user_input(&client, &args.prompt, &skills, &lsp, false).await,
+            );
             (messages, skills)
         } else {
             (
@@ -62,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let msg = agent_loop(&client, messages, &skills, false).await?;
+    let msg = agent_loop(&client, messages, &skills, &lsp, false).await?;
     println!("{msg}");
 
     Ok(())
@@ -72,6 +75,7 @@ async fn agent_loop(
     client: &Client<OpenAIConfig>,
     mut messages: Vec<Message>,
     skills: &[skills::Skill],
+    lsp: &Option<lsp_client::LspClient>,
     is_sub: bool,
 ) -> anyhow::Result<String> {
     loop {
@@ -114,7 +118,7 @@ async fn agent_loop(
         });
 
         for tool in tools {
-            tool.exec(client, &mut messages, skills, is_sub)
+            tool.exec(client, &mut messages, skills, lsp, is_sub)
                 .await
                 .context("tool running")?;
         }
