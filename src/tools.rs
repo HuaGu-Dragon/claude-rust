@@ -139,6 +139,7 @@ pub enum ToolName {
     Write,
     Bash,
     Skill,
+    #[serde(rename = "LSP")]
     Lsp,
 }
 
