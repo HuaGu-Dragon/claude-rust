@@ -130,7 +130,7 @@ pub enum ToolTy {
 pub struct FunctionCall {
     pub name: ToolName,
     #[serde(rename = "arguments", with = "deserialize_string_to_hashmap")]
-    pub args: HashMap<String, String>,
+    pub args: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,24 +146,22 @@ mod deserialize_string_to_hashmap {
     use std::collections::HashMap;
 
     use serde::{Deserialize, Deserializer, Serializer};
+    use serde_json::Value;
 
-    pub fn serialize<S>(table: &HashMap<String, String>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(table: &HashMap<String, Value>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let s = format!("{:?}", table);
+        let s = serde_json::to_string(table).map_err(serde::ser::Error::custom)?;
         serializer.serialize_str(&s)
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<String, Value>, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        eprintln!("input: {s}");
-        let table = serde_json::from_str(&s).expect("must parse as a hash table");
-
-        Ok(table)
+        serde_json::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -181,7 +179,7 @@ impl Tool {
                 function: FunctionCall { name, args },
             } => match name {
                 ToolName::Read => {
-                    let path = args.get("file_path").expect("there must be a file_path");
+                    let path = str_arg(&args, "file_path");
 
                     match tokio::fs::read_to_string(path).await {
                         Ok(content) => messages.push(Message::Tool {
@@ -195,8 +193,8 @@ impl Tool {
                     };
                 }
                 ToolName::Write => {
-                    let path = args.get("file_path").expect("there must be a file_path");
-                    let content = args.get("content").expect("there must be a content");
+                    let path = str_arg(&args, "file_path");
+                    let content = str_arg(&args, "content");
 
                     tokio::fs::write(path, content)
                         .await
@@ -204,11 +202,11 @@ impl Tool {
 
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
-                        content: content.clone(),
+                        content: content.to_string(),
                     });
                 }
                 ToolName::Bash => {
-                    let com = args.get("command").expect("there must be a command");
+                    let com = str_arg(&args, "command");
                     let output = std::process::Command::new("bash")
                         .arg("-c")
                         .arg(com)
@@ -227,11 +225,11 @@ impl Tool {
                     });
                 }
                 ToolName::Skill => {
-                    let skill_name = args.get("name").expect("there must be a name");
-                    let args = args.get("args").map(String::as_str).unwrap_or_default();
+                    let skill_name = str_arg(&args, "name");
+                    let args = args.get("args").and_then(Value::as_str).unwrap_or_default();
                     let skill = skills
                         .iter()
-                        .find(|s| &s.name == skill_name)
+                        .find(|s| s.name == skill_name)
                         .with_context(|| format!("could not find skill `{skill_name}`"))?;
 
                     let ret = skill.execute(client, args, lsp, is_sub).await;
@@ -266,10 +264,16 @@ impl Tool {
     }
 }
 
+fn str_arg<'a>(args: &'a HashMap<String, Value>, key: &str) -> &'a str {
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("there must be a string `{key}` argument"))
+}
+
 #[test]
 fn test_de() {
     let mut table = HashMap::new();
-    table.insert("file_path".to_string(), "/path/to/file.txt".to_string());
+    table.insert("file_path".to_string(), json!("/path/to/file.txt"));
 
     let t = Tool {
         id: "call_abc123".to_string(),
