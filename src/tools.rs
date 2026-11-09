@@ -160,6 +160,7 @@ mod deserialize_string_to_hashmap {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
+        eprintln!("input: {s}");
         let table = serde_json::from_str(&s).expect("must parse as a hash table");
 
         Ok(table)
