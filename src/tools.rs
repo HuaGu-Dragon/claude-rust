@@ -241,15 +241,80 @@ impl Tool {
                 }
                 ToolName::Lsp => {
                     if let Some(lsp) = lsp {
-                        // let operation = args.get("operation").expect("there must be an operation");
-                        // let file_path = args.get("filePath").expect("there must be a file path");
-                        // let line = args.get("line").expect("there must be a line");
-                        // let character = args.get("character").expect("there must be a character");
+                        let file_path = str_arg(&args, "filePath");
+                        let file = std::fs::File::open(file_path)
+                            .with_context(|| format!("could not open file `{file_path}`"))?;
+                        let cur_dir = std::env::current_dir().unwrap();
 
-                        // lsp.call(operation, &serde_json::t);
+                        let source = std::io::read_to_string(file).unwrap();
+
+                        let file_uri = format!("file://{}/{}", cur_dir.display(), file_path);
+
+                        let open_payload = json!({
+                            "method": "textDocument/didOpen",
+                            "params": {
+                                "textDocument": {
+                                    "uri": file_uri,
+                                    "languageId": "python",
+                                    "version": 1,
+                                    "text": source,
+                                }
+                            }
+                        });
+                        lsp.call("notify", &open_payload)?;
+
+                        let operation = str_arg(&args, "operation");
+                        assert_eq!(operation, "goToDefinition");
+                        let line = args
+                            .get("line")
+                            .expect("there must be a line")
+                            .as_i64()
+                            .unwrap();
+                        let character = args
+                            .get("character")
+                            .expect("there must be a character")
+                            .as_i64()
+                            .unwrap();
+
+                        let payload = json!({
+                            "method": "textDocument/definition",
+                            "params": {
+                                "textDocument": {
+                                    "uri": file_uri,
+                                },
+                                "position": {
+                                    "line": line - 1,
+                                    "character": character - 1,
+                                }
+                            }
+                        });
+
+                        let lsp_result = lsp.call("request", &payload)?;
+
+                        let target_uri = lsp_result["uri"].as_str().unwrap();
+                        let target_range_start_char =
+                            lsp_result["range"].as_object().unwrap()["start"]
+                                .as_object()
+                                .unwrap()["character"]
+                                .as_i64()
+                                .unwrap();
+                        let target_range_start_line =
+                            lsp_result["range"].as_object().unwrap()["start"]
+                                .as_object()
+                                .unwrap()["line"]
+                                .as_i64()
+                                .unwrap();
+
+                        let relative_file_path =
+                            &target_uri[&cur_dir.to_str().unwrap().len() + 8..];
                         messages.push(Message::Tool {
                             tool_call_id: self.id,
-                            content: "LSP is not implemented yet".to_string(),
+                            content: format!(
+                                "Defined in {}:{}:{}",
+                                relative_file_path,
+                                target_range_start_line + 1,
+                                target_range_start_char + 1
+                            ),
                         });
                     } else {
                         messages.push(Message::Tool {
