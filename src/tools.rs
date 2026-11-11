@@ -264,7 +264,6 @@ impl Tool {
                         lsp.call("notify", &open_payload)?;
 
                         let operation = str_arg(&args, "operation");
-                        assert_eq!(operation, "goToDefinition");
                         let line = args
                             .get("line")
                             .expect("there must be a line")
@@ -276,46 +275,108 @@ impl Tool {
                             .as_i64()
                             .unwrap();
 
-                        let payload = json!({
-                            "method": "textDocument/definition",
-                            "params": {
-                                "textDocument": {
-                                    "uri": file_uri,
-                                },
-                                "position": {
-                                    "line": line - 1,
-                                    "character": character - 1,
-                                }
+                        match operation {
+                            "goToDefinition" => {
+                                let payload = json!({
+                                    "method": "textDocument/definition",
+                                    "params": {
+                                        "textDocument": {
+                                            "uri": file_uri,
+                                        },
+                                        "position": {
+                                            "line": line - 1,
+                                            "character": character - 1,
+                                        }
+                                    }
+                                });
+
+                                let lsp_result = lsp.call("request", &payload)?;
+
+                                let target_uri = lsp_result["uri"].as_str().unwrap();
+                                let target_range_start_char =
+                                    lsp_result["range"].as_object().unwrap()["start"]
+                                        .as_object()
+                                        .unwrap()["character"]
+                                        .as_i64()
+                                        .unwrap();
+                                let target_range_start_line =
+                                    lsp_result["range"].as_object().unwrap()["start"]
+                                        .as_object()
+                                        .unwrap()["line"]
+                                        .as_i64()
+                                        .unwrap();
+
+                                let relative_file_path =
+                                    &target_uri[&cur_dir.to_str().unwrap().len() + 8..];
+                                messages.push(Message::Tool {
+                                    tool_call_id: self.id,
+                                    content: format!(
+                                        "Defined in {}:{}:{}",
+                                        relative_file_path,
+                                        target_range_start_line + 1,
+                                        target_range_start_char + 1
+                                    ),
+                                });
                             }
-                        });
+                            "findReferences" => {
+                                let payload = json!({
+                                    "method": "textDocument/references",
+                                    "params": {
+                                        "textDocument": {
+                                            "uri": file_uri,
+                                        },
+                                        "position": {
+                                            "line": line - 1,
+                                            "character": character - 1,
+                                        },
+                                        "context": { "includeDeclaration": true }
+                                    }
+                                });
 
-                        let lsp_result = lsp.call("request", &payload)?;
+                                let lsp_result = lsp.call("request", &payload)?;
 
-                        let target_uri = lsp_result["uri"].as_str().unwrap();
-                        let target_range_start_char =
-                            lsp_result["range"].as_object().unwrap()["start"]
-                                .as_object()
-                                .unwrap()["character"]
-                                .as_i64()
-                                .unwrap();
-                        let target_range_start_line =
-                            lsp_result["range"].as_object().unwrap()["start"]
-                                .as_object()
-                                .unwrap()["line"]
-                                .as_i64()
-                                .unwrap();
+                                let target_uris: HashMap<String, Vec<(i64, i64)>> = lsp_result
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .fold(HashMap::new(), |mut map, v| {
+                                        let uri = v["uri"].as_str().unwrap().to_string();
+                                        let start = &v["range"]["start"];
 
-                        let relative_file_path =
-                            &target_uri[&cur_dir.to_str().unwrap().len() + 8..];
-                        messages.push(Message::Tool {
-                            tool_call_id: self.id,
-                            content: format!(
-                                "Defined in {}:{}:{}",
-                                relative_file_path,
-                                target_range_start_line + 1,
-                                target_range_start_char + 1
-                            ),
-                        });
+                                        let character = start["character"].as_i64().unwrap();
+                                        let line = start["line"].as_i64().unwrap();
+
+                                        map.entry(uri)
+                                            .or_insert_with(Vec::new)
+                                            .push((character, line));
+
+                                        map
+                                    });
+
+                                let mut content = format!(
+                                    "Found {} references across {} files:\n\n",
+                                    target_uris.values().map(|v| v.len()).sum::<usize>(),
+                                    target_uris.len()
+                                );
+
+                                for (target_uri, target_ranges) in target_uris.iter() {
+                                    let relative_file_path =
+                                        &target_uri[&cur_dir.to_str().unwrap().len() + 8..];
+
+                                    content.push_str(&format!("{}:\n", relative_file_path,));
+
+                                    for (character, line) in target_ranges.iter() {
+                                        content
+                                            .push_str(&format!("  Line {}:{}\n", character, line));
+                                    }
+                                }
+                                messages.push(Message::Tool {
+                                    tool_call_id: self.id,
+                                    content,
+                                });
+                            }
+                            s => panic!("{}: not yet implemented", s),
+                        }
                     } else {
                         messages.push(Message::Tool {
                             tool_call_id: self.id,
