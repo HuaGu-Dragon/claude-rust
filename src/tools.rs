@@ -292,6 +292,7 @@ impl Tool {
 
                                 let lsp_result = lsp.call("request", &payload)?;
 
+                                eprintln!("{lsp_result}");
                                 let target_uri = lsp_result["uri"].as_str().unwrap();
                                 let target_range_start_char =
                                     lsp_result["range"].as_object().unwrap()["start"]
