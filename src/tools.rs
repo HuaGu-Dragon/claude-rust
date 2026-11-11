@@ -89,7 +89,7 @@ pub fn tools_define() -> Value {
                     "properties": {
                         "operation": {
                             "type": "string",
-                            "enum": ["goToDefinition"]
+                            "enum": ["goToDefinition", "findReferences"]
                         },
                         "filePath": {
                             "type": "string",
@@ -248,7 +248,11 @@ impl Tool {
 
                         let source = std::io::read_to_string(file).unwrap();
 
-                        let file_uri = format!("file://{}/{}", cur_dir.display(), file_path);
+                        let file_uri = if std::path::Path::new(file_path).is_absolute() {
+                            format!("file://{file_path}")
+                        } else {
+                            format!("file://{}/{}", cur_dir.display(), file_path)
+                        };
 
                         let open_payload = json!({
                             "method": "textDocument/didOpen",
@@ -336,23 +340,31 @@ impl Tool {
 
                                 let lsp_result = lsp.call("request", &payload)?;
 
-                                let target_uris: HashMap<String, Vec<(i64, i64)>> = lsp_result
-                                    .as_array()
-                                    .unwrap()
-                                    .iter()
-                                    .fold(HashMap::new(), |mut map, v| {
-                                        let uri = v["uri"].as_str().unwrap().to_string();
-                                        let start = &v["range"]["start"];
-
-                                        let character = start["character"].as_i64().unwrap();
-                                        let line = start["line"].as_i64().unwrap();
-
-                                        map.entry(uri)
-                                            .or_insert_with(Vec::new)
-                                            .push((character, line));
-
-                                        map
-                                    });
+                                let locations: Vec<Value> = match lsp_result {
+                                    Value::Array(a) => a,
+                                    Value::Null => Vec::new(),
+                                    other => vec![other],
+                                };
+                                let mut target_uris: std::collections::BTreeMap<
+                                    String,
+                                    Vec<(i64, i64)>,
+                                > = std::collections::BTreeMap::new();
+                                for v in &locations {
+                                    let (Some(uri), Some(line), Some(character)) = (
+                                        v["uri"].as_str(),
+                                        v["range"]["start"]["line"].as_i64(),
+                                        v["range"]["start"]["character"].as_i64(),
+                                    ) else {
+                                        continue;
+                                    };
+                                    target_uris
+                                        .entry(uri.to_string())
+                                        .or_default()
+                                        .push((line + 1, character + 1));
+                                }
+                                for ranges in target_uris.values_mut() {
+                                    ranges.sort();
+                                }
 
                                 let mut content = format!(
                                     "Found {} references across {} files:\n\n",
@@ -361,14 +373,18 @@ impl Tool {
                                 );
 
                                 for (target_uri, target_ranges) in target_uris.iter() {
-                                    let relative_file_path =
-                                        &target_uri[&cur_dir.to_str().unwrap().len() + 8..];
+                                    let raw =
+                                        target_uri.strip_prefix("file://").unwrap_or(target_uri);
+                                    let relative_file_path = std::path::Path::new(raw)
+                                        .strip_prefix(&cur_dir)
+                                        .map(|p| p.display().to_string())
+                                        .unwrap_or_else(|_| raw.to_string());
 
-                                    content.push_str(&format!("{}:\n", relative_file_path,));
+                                    content.push_str(&format!("{}:\n", relative_file_path));
 
-                                    for (character, line) in target_ranges.iter() {
+                                    for (line, character) in target_ranges.iter() {
                                         content
-                                            .push_str(&format!("  Line {}:{}\n", character, line));
+                                            .push_str(&format!("  Line {}:{}\n", line, character));
                                     }
                                 }
                                 messages.push(Message::Tool {
