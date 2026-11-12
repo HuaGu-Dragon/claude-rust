@@ -6,15 +6,7 @@ use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-
-/// How long to wait for the server to publish diagnostics after an edit.
-const DIAGNOSTICS_FIRST_WAIT_MS: u64 = 2000;
-/// After a report arrives, how long the queue must stay quiet before we
-/// assume the server has finished analysing the edit.
-const DIAGNOSTICS_SETTLE_MS: u64 = 500;
-/// Upper bound on the total time spent waiting for diagnostics.
-const DIAGNOSTICS_MAX_WAIT: Duration = Duration::from_secs(5);
+use std::time::Duration;
 
 #[derive(Default)]
 struct DiagnosticState {
@@ -31,8 +23,8 @@ pub struct LspClient {
     /// Documents open on this connection: URI -> last version sent.
     documents: Mutex<HashMap<String, i64>>,
     diagnostics: Mutex<DiagnosticState>,
-    /// Set when a Write synchronized a document; the next diagnostics read
-    /// then waits for the server's analysis instead of returning immediately.
+    /// Set when a Write synchronized a document, so the caller knows to give
+    /// the server time to analyse it before reading diagnostics.
     awaiting_diagnostics: AtomicBool,
 }
 
@@ -128,6 +120,12 @@ impl LspClient {
         Ok(true)
     }
 
+    /// Returns true (and resets the flag) if a document was synchronized
+    /// since the last call, meaning diagnostics may still be on their way.
+    pub fn take_awaiting_diagnostics(&self) -> bool {
+        self.awaiting_diagnostics.swap(false, Ordering::SeqCst)
+    }
+
     /// Reads queued `publishDiagnostics` notifications and returns a message
     /// describing diagnostics that weren't already shown for their file.
     ///
@@ -136,43 +134,17 @@ impl LspClient {
     /// for a file replaces the previous one, so an empty report clears it.
     pub fn new_diagnostics(&self) -> anyhow::Result<Option<String>> {
         let mut state = self.diagnostics.lock().unwrap();
-
-        // Diagnostics are published asynchronously after analysis. If a
-        // document changed since the last read, wait for the server; otherwise
-        // just drain what is already queued.
-        let waiting = self.awaiting_diagnostics.swap(false, Ordering::SeqCst);
-        let started = Instant::now();
-        let mut timeout_ms = if waiting {
-            DIAGNOSTICS_FIRST_WAIT_MS
-        } else {
-            0
-        };
-        let mut notifications: Vec<Value> = Vec::new();
-        loop {
-            let response = match self.call(
-                "notifications",
-                &serde_json::json!({ "after": state.cursor, "timeoutMs": timeout_ms }),
-            ) {
-                Ok(response) => response,
-                // Keep what was already read rather than losing it.
-                Err(_) if !notifications.is_empty() => break,
-                Err(e) => return Err(e),
-            };
-            if let Some(cursor) = response["cursor"].as_i64() {
-                state.cursor = cursor;
-            }
-            let batch = response["notifications"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let received = !batch.is_empty();
-            notifications.extend(batch);
-
-            if !waiting || !received || started.elapsed() >= DIAGNOSTICS_MAX_WAIT {
-                break;
-            }
-            timeout_ms = DIAGNOSTICS_SETTLE_MS;
+        let response = self.call(
+            "notifications",
+            &serde_json::json!({ "after": state.cursor, "timeoutMs": 0 }),
+        )?;
+        if let Some(cursor) = response["cursor"].as_i64() {
+            state.cursor = cursor;
         }
+        let notifications = response["notifications"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
 
         let mut latest: BTreeMap<String, Vec<Value>> = BTreeMap::new();
         {

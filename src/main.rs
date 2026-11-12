@@ -126,6 +126,11 @@ async fn agent_loop(
         // Deliver newly published diagnostics with the latest tool result so
         // the model sees them before its next request.
         if let Some(lsp) = lsp {
+            // The server publishes diagnostics asynchronously after an edit,
+            // so give it a moment to analyse before reading its queue.
+            if lsp.take_awaiting_diagnostics() {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            }
             match lsp.new_diagnostics() {
                 Ok(Some(report)) => {
                     if let Some(Message::Tool { content, .. }) = messages.last_mut() {
