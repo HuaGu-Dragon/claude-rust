@@ -1,14 +1,19 @@
 use anyhow::{Context, bail};
-// Only needed for the LSP extension.
-// You can ignore this file until you reach that extension.
-// Course-supplied transport. This client talks only to the local HTTP bridge.
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
+
+#[derive(Default)]
+struct DiagnosticState {
+    /// Cursor for the server's notification queue.
+    cursor: i64,
+    /// Diagnostics most recently shown to the model, per document URI.
+    shown: HashMap<String, Vec<Value>>,
+}
 
 pub struct LspClient {
     address: String,
@@ -16,6 +21,7 @@ pub struct LspClient {
     pub extension_to_language: HashMap<String, String>,
     /// Documents open on this connection: URI -> last version sent.
     documents: Mutex<HashMap<String, i64>>,
+    diagnostics: Mutex<DiagnosticState>,
 }
 
 impl LspClient {
@@ -41,6 +47,7 @@ impl LspClient {
             },
             extension_to_language: HashMap::new(),
             documents: Mutex::new(HashMap::new()),
+            diagnostics: Mutex::new(DiagnosticState::default()),
         };
         let configuration = client.call("configuration", &serde_json::json!({}))?;
         client.extension_to_language =
@@ -105,6 +112,92 @@ impl LspClient {
         };
         documents.insert(uri, version);
         Ok(true)
+    }
+
+    /// Reads queued `publishDiagnostics` notifications and returns a message
+    /// describing diagnostics that weren't already shown for their file.
+    ///
+    /// A report is current if its version matches the last version sent for
+    /// that document, or if it carries no version. The latest current report
+    /// for a file replaces the previous one, so an empty report clears it.
+    pub fn new_diagnostics(&self) -> anyhow::Result<Option<String>> {
+        let mut state = self.diagnostics.lock().unwrap();
+        let response = self.call(
+            "notifications",
+            &serde_json::json!({ "after": state.cursor, "timeoutMs": 0 }),
+        )?;
+        if let Some(cursor) = response["cursor"].as_i64() {
+            state.cursor = cursor;
+        }
+
+        let mut latest: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        {
+            let documents = self.documents.lock().unwrap();
+            for notification in response["notifications"].as_array().into_iter().flatten() {
+                if notification["method"] != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let params = &notification["params"];
+                let Some(uri) = params["uri"].as_str() else {
+                    continue;
+                };
+                if let Some(version) = params["version"].as_i64()
+                    && documents.get(uri) != Some(&version)
+                {
+                    continue;
+                }
+                let diagnostics = params["diagnostics"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                latest.insert(uri.to_string(), diagnostics);
+            }
+        }
+
+        let mut report = String::new();
+        for (uri, current) in latest {
+            let previous = state.shown.get(&uri).map(Vec::as_slice).unwrap_or_default();
+            let mut issues: Vec<(i64, i64, &str)> = current
+                .iter()
+                .filter(|d| !previous.contains(d))
+                .filter_map(|d| {
+                    Some((
+                        d["range"]["start"]["line"].as_i64()? + 1,
+                        d["range"]["start"]["character"].as_i64()? + 1,
+                        d["message"].as_str()?,
+                    ))
+                })
+                .collect();
+            issues.sort();
+
+            if !issues.is_empty() {
+                report.push_str(&format!("\n{}:\n", Self::display_path(&uri)));
+                for (line, character, message) in issues {
+                    report.push_str(&format!("  [Line {line}:{character}] {message}\n"));
+                }
+            }
+            state.shown.insert(uri, current);
+        }
+
+        if report.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "<new-diagnostics>The following new diagnostic issues were detected. \
+             Treat them as feedback on your recent edits and fix any that your changes caused:\n{}</new-diagnostics>",
+            report.trim_end()
+        )))
+    }
+
+    pub fn display_path(uri: &str) -> String {
+        let raw = uri.strip_prefix("file://").unwrap_or(uri);
+        match std::env::current_dir() {
+            Ok(cwd) => Path::new(raw)
+                .strip_prefix(&cwd)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| raw.to_string()),
+            Err(_) => raw.to_string(),
+        }
     }
 
     fn send_did_open(

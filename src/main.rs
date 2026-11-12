@@ -122,5 +122,20 @@ async fn agent_loop(
                 .await
                 .context("tool running")?;
         }
+
+        // Deliver newly published diagnostics with the latest tool result so
+        // the model sees them before its next request.
+        if let Some(lsp) = lsp {
+            match lsp.new_diagnostics() {
+                Ok(Some(report)) => {
+                    if let Some(Message::Tool { content, .. }) = messages.last_mut() {
+                        content.push_str("\n\n");
+                        content.push_str(&report);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("failed to read LSP diagnostics: {e:#}"),
+            }
+        }
     }
 }
