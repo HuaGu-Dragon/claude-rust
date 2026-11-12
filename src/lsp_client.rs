@@ -141,6 +141,13 @@ impl LspClient {
         if let Some(cursor) = response["cursor"].as_i64() {
             state.cursor = cursor;
         }
+        if response["notifications"]
+            .as_array()
+            .is_some_and(|n| !n.is_empty())
+        {
+            eprintln!("[lsp] notifications: {response}");
+            eprintln!("[lsp] sent versions: {:?}", self.documents.lock().unwrap());
+        }
         let notifications = response["notifications"]
             .as_array()
             .cloned()

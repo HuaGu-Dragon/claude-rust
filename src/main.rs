@@ -121,25 +121,27 @@ async fn agent_loop(
             tool.exec(client, &mut messages, skills, lsp, is_sub)
                 .await
                 .context("tool running")?;
-        }
 
-        // Deliver newly published diagnostics with the latest tool result so
-        // the model sees them before its next request.
-        if let Some(lsp) = lsp {
-            // The server publishes diagnostics asynchronously after an edit,
-            // so give it a moment to analyse before reading its queue.
-            if lsp.take_awaiting_diagnostics() {
-                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            }
-            match lsp.new_diagnostics() {
-                Ok(Some(report)) => {
-                    if let Some(Message::Tool { content, .. }) = messages.last_mut() {
-                        content.push_str("\n\n");
-                        content.push_str(&report);
-                    }
+            // Check after every tool call, not once per batch. If the model
+            // edits several files in one turn, a report about an earlier edit
+            // would otherwise go stale (its file's version bumped by a later
+            // edit) before we ever read it.
+            if let Some(lsp) = lsp {
+                // The server publishes diagnostics asynchronously after an
+                // edit, so give it a moment to analyse before reading.
+                if lsp.take_awaiting_diagnostics() {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 }
-                Ok(None) => {}
-                Err(e) => eprintln!("failed to read LSP diagnostics: {e:#}"),
+                match lsp.new_diagnostics() {
+                    Ok(Some(report)) => {
+                        if let Some(Message::Tool { content, .. }) = messages.last_mut() {
+                            content.push_str("\n\n");
+                            content.push_str(&report);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("failed to read LSP diagnostics: {e:#}"),
+                }
             }
         }
     }
