@@ -201,9 +201,19 @@ impl Tool {
                         .await
                         .with_context(|| format!("write content to `{path}`"))?;
 
+                    let content = match lsp {
+                        Some(lsp) => match lsp.sync_document(path, content) {
+                            Ok(_) => content.to_string(),
+                            Err(e) => format!(
+                                "Wrote `{path}`, but failed to sync it with the language server: {e:#}"
+                            ),
+                        },
+                        None => content.to_string(),
+                    };
+
                     messages.push(Message::Tool {
                         tool_call_id: self.id,
-                        content: content.to_string(),
+                        content,
                     });
                 }
                 ToolName::Bash => {
@@ -242,30 +252,11 @@ impl Tool {
                 ToolName::Lsp => {
                     if let Some(lsp) = lsp {
                         let file_path = str_arg(&args, "filePath");
-                        let file = std::fs::File::open(file_path)
-                            .with_context(|| format!("could not open file `{file_path}`"))?;
                         let cur_dir = std::env::current_dir().unwrap();
 
-                        let source = std::io::read_to_string(file).unwrap();
-
-                        let file_uri = if std::path::Path::new(file_path).is_absolute() {
-                            format!("file://{file_path}")
-                        } else {
-                            format!("file://{}/{}", cur_dir.display(), file_path)
-                        };
-
-                        let open_payload = json!({
-                            "method": "textDocument/didOpen",
-                            "params": {
-                                "textDocument": {
-                                    "uri": file_uri,
-                                    "languageId": "python",
-                                    "version": 1,
-                                    "text": source,
-                                }
-                            }
-                        });
-                        lsp.call("notify", &open_payload)?;
+                        // Opens the document only if Write or an earlier
+                        // lookup hasn't already done so.
+                        let file_uri = lsp.ensure_open(file_path)?;
 
                         let operation = str_arg(&args, "operation");
                         let line = args
@@ -296,7 +287,6 @@ impl Tool {
 
                                 let lsp_result = lsp.call("request", &payload)?;
 
-                                eprintln!("{lsp_result}");
                                 let target_uri = lsp_result["uri"].as_str().unwrap();
                                 let target_range_start_char =
                                     lsp_result["range"].as_object().unwrap()["start"]
