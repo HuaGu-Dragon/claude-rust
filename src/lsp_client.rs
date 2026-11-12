@@ -5,7 +5,16 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+/// How long to wait for the server to publish diagnostics after an edit.
+const DIAGNOSTICS_FIRST_WAIT_MS: u64 = 2000;
+/// After a report arrives, how long the queue must stay quiet before we
+/// assume the server has finished analysing the edit.
+const DIAGNOSTICS_SETTLE_MS: u64 = 500;
+/// Upper bound on the total time spent waiting for diagnostics.
+const DIAGNOSTICS_MAX_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct DiagnosticState {
@@ -22,6 +31,9 @@ pub struct LspClient {
     /// Documents open on this connection: URI -> last version sent.
     documents: Mutex<HashMap<String, i64>>,
     diagnostics: Mutex<DiagnosticState>,
+    /// Set when a Write synchronized a document; the next diagnostics read
+    /// then waits for the server's analysis instead of returning immediately.
+    awaiting_diagnostics: AtomicBool,
 }
 
 impl LspClient {
@@ -48,6 +60,7 @@ impl LspClient {
             extension_to_language: HashMap::new(),
             documents: Mutex::new(HashMap::new()),
             diagnostics: Mutex::new(DiagnosticState::default()),
+            awaiting_diagnostics: AtomicBool::new(false),
         };
         let configuration = client.call("configuration", &serde_json::json!({}))?;
         client.extension_to_language =
@@ -111,6 +124,7 @@ impl LspClient {
             }
         };
         documents.insert(uri, version);
+        self.awaiting_diagnostics.store(true, Ordering::SeqCst);
         Ok(true)
     }
 
@@ -122,18 +136,48 @@ impl LspClient {
     /// for a file replaces the previous one, so an empty report clears it.
     pub fn new_diagnostics(&self) -> anyhow::Result<Option<String>> {
         let mut state = self.diagnostics.lock().unwrap();
-        let response = self.call(
-            "notifications",
-            &serde_json::json!({ "after": state.cursor, "timeoutMs": 0 }),
-        )?;
-        if let Some(cursor) = response["cursor"].as_i64() {
-            state.cursor = cursor;
+
+        // Diagnostics are published asynchronously after analysis. If a
+        // document changed since the last read, wait for the server; otherwise
+        // just drain what is already queued.
+        let waiting = self.awaiting_diagnostics.swap(false, Ordering::SeqCst);
+        let started = Instant::now();
+        let mut timeout_ms = if waiting {
+            DIAGNOSTICS_FIRST_WAIT_MS
+        } else {
+            0
+        };
+        let mut notifications: Vec<Value> = Vec::new();
+        loop {
+            let response = match self.call(
+                "notifications",
+                &serde_json::json!({ "after": state.cursor, "timeoutMs": timeout_ms }),
+            ) {
+                Ok(response) => response,
+                // Keep what was already read rather than losing it.
+                Err(_) if !notifications.is_empty() => break,
+                Err(e) => return Err(e),
+            };
+            if let Some(cursor) = response["cursor"].as_i64() {
+                state.cursor = cursor;
+            }
+            let batch = response["notifications"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let received = !batch.is_empty();
+            notifications.extend(batch);
+
+            if !waiting || !received || started.elapsed() >= DIAGNOSTICS_MAX_WAIT {
+                break;
+            }
+            timeout_ms = DIAGNOSTICS_SETTLE_MS;
         }
 
         let mut latest: BTreeMap<String, Vec<Value>> = BTreeMap::new();
         {
             let documents = self.documents.lock().unwrap();
-            for notification in response["notifications"].as_array().into_iter().flatten() {
+            for notification in &notifications {
                 if notification["method"] != "textDocument/publishDiagnostics" {
                     continue;
                 }
