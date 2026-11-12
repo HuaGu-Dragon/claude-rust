@@ -83,7 +83,7 @@ pub fn tools_define() -> Value {
             "type": "function",
             "function": {
                 "name": "LSP",
-                "description": "Returns the file, line, and character where a symbol is defined.",
+                "description": "Language server queries for the symbol at a position. `goToDefinition` returns the file, line, and character where the symbol is defined. `findReferences` returns every location that references the symbol, including its declaration; use it to find callers affected by a change. Positions are only valid for the file's current contents: after editing a file with Write, line numbers can shift, so never reuse or guess an old position. Get the symbol's current position first, either by running `goToDefinition` from a place that uses it or by reading the file and counting lines, and use the position the tool returns.",
                 "parameters": {
                     "type": "object",
                     "properties": {
